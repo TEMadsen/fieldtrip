@@ -173,6 +173,7 @@ for trlop=1:ntrl
   
   % ensure that the number of samples does not change
   identical = [identical zeros(nsgn,1)];
+  chclip = identical;  % set aside to identify which channels clipped
   
   % determine the number of consecutively identical samples
   clip = zeros(size(dat));
@@ -183,7 +184,6 @@ for trlop=1:ntrl
       clip(sgnlop,up(k):dw(k)) = dw(k)-up(k);
     end
   end
-  chclip = clip;  % set full var aside to identify which channels clipped
   clip = max(clip,[],1);  % collapse over channels
   
   % detect whether there are intervals in which the number of consecutive
@@ -205,13 +205,13 @@ end
 
 if ~isempty(artifact)
   chdist = sum(trdist,2,'omitnan');
-  goodch = find(chdist < mean(chdist)*0.5);   % 50% less than fair
-  blame = find(chdist > mean(chdist)*1.5);    % 50% more than fair
-  if numel(goodch) > numel(blame) && numel(blame) > 0
-    warning(['Channels ' hdr.label{sgnindx(blame)} ' account for ' ...
-      num2str(chdist(blame)'./mean(chdist)) ...
-      ' times more clipping artifacts than the average channel in trial #' ...
-      num2str(trlop) '.  Consider invalidating them.'])
+  blame = find(chdist > mean(chdist)*1.1);    % 10% more than fair
+  if numel(blame) > 0
+    disp([char(hdr.label(sgnindx(blame))) ...
+      repmat(' accounts for ', numel(blame), 1) ...
+      num2str((chdist(blame)./mean(chdist)-1)*100,3) ...
+      repmat('% more clipping than average.', numel(blame), 1)]);
+    warning('Consider invalidating the listed channel(s).')
   end
   % add the pretim and psttim to the detected artifacts
   artifact(:,1) = artifact(:,1) - artfctdef.pretim * hdr.Fs;
