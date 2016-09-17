@@ -139,6 +139,7 @@ artfctdef = cfg.artfctdef.clip;
 
 ntrl = size(trl,1);
 nsgn = length(sgnindx);
+trdist = nan(nsgn,ntrl);
 for trlop=1:ntrl
   fprintf('searching for clipping artifacts in trial %d\n', trlop);
   % read the data of this trial
@@ -154,7 +155,7 @@ for trlop=1:ntrl
     time = data.time{trlop};
   end
   datflt = preproc(dat, label, time, artfctdef);
-
+  
   %check if cfg.artfctdef.clip.amplthreshold is an string indicating percentage (e.g. '10%')
   if ~isempty(cfg.artfctdef.clip.amplthreshold) && ischar(cfg.artfctdef.clip.amplthreshold) && cfg.artfctdef.clip.amplthreshold(end)=='%'
     ratio = sscanf(cfg.artfctdef.clip.amplthreshold, '%f%%');
@@ -169,10 +170,10 @@ for trlop=1:ntrl
     % detect all samples that have the same value as the previous sample
     identical = abs(datflt(:,1:(end-1))-datflt(:,2:end))<=cfg.artfctdef.clip.amplthreshold;
   end
-
+  
   % ensure that the number of samples does not change
   identical = [identical zeros(nsgn,1)];
-
+  
   % determine the number of consecutively identical samples
   clip = zeros(size(dat));
   for sgnlop=1:length(sgnindx)
@@ -182,13 +183,18 @@ for trlop=1:ntrl
       clip(sgnlop,up(k):dw(k)) = dw(k)-up(k);
     end
   end
-  % collapse over cannels
-  clip = max(clip,[],1);
-
+  chclip = clip;  % set full var aside to identify which channels clipped
+  clip = max(clip,[],1);  % collapse over channels
+  
   % detect whether there are intervals in which the number of consecutive
   % identical samples is larger than the threshold
   thresh = (clip>=artfctdef.timethreshold*hdr.Fs);
-
+  
+  if any(thresh)
+    % examine channel distribution of clipping during identified artifacts
+    trdist(:,trlop) = sum(chclip(:,thresh(any(chclip == 0))) ~= 0, 2);
+  end
+  
   % remember the thresholded parts as artifacts
   artup = find(diff([0 thresh])== 1) + trl(trlop,1) - 1;
   artdw = find(diff([thresh 0])==-1) + trl(trlop,1) - 1;
@@ -198,6 +204,15 @@ for trlop=1:ntrl
 end
 
 if ~isempty(artifact)
+  chdist = sum(trdist,2,'omitnan');
+  goodch = find(chdist < mean(chdist)*0.5);   % 50% less than fair
+  blame = find(chdist > mean(chdist)*1.5);    % 50% more than fair
+  if numel(goodch) > numel(blame) && numel(blame) > 0
+    warning(['Channels ' hdr.label{sgnindx(blame)} ' account for ' ...
+      num2str(chdist(blame)'./mean(chdist)) ...
+      ' times more clipping artifacts than the average channel in trial #' ...
+      num2str(trlop) '.  Consider invalidating them.'])
+  end
   % add the pretim and psttim to the detected artifacts
   artifact(:,1) = artifact(:,1) - artfctdef.pretim * hdr.Fs;
   artifact(:,2) = artifact(:,2) + artfctdef.psttim * hdr.Fs;
