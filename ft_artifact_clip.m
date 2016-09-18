@@ -16,13 +16,29 @@ function [cfg, artifact] = ft_artifact_clip(cfg, data)
 %   [cfg, artifact] = ft_artifact_clip(cfg, data)
 %
 % In both cases the configuration should also contain
-%   cfg.artfctdef.clip.channel       = Nx1 cell-array with selection of channels, see FT_CHANNELSELECTION for details
-%   cfg.artfctdef.clip.pretim        = 0.000;  pre-artifact rejection-interval in seconds
-%   cfg.artfctdef.clip.psttim        = 0.000;  post-artifact rejection-interval in seconds
-%   cfg.artfctdef.clip.timethreshold = number, minimum duration in seconds of a datasegment with consecutive identical samples to be considered as 'clipped'
-%   cfg.artfctdef.clip.amplthreshold = number, minimum amplitude difference in consecutive samples to be considered as 'clipped' (default = 0)
-%                                      string, percent of the amplitude range considered as 'clipped' (i.e. '1%')
-%   cfg.continuous                   = 'yes' or 'no' whether the file contains continuous data
+%   cfg.artfctdef.clip.channel        = Nx1 cell-array with selection of
+%                                       channels, see FT_CHANNELSELECTION
+%                                       for details
+%   cfg.artfctdef.clip.pretim         = 0.000;  pre-artifact rejection
+%                                       interval in seconds 
+%   cfg.artfctdef.clip.psttim         = 0.000;  post-artifact rejection
+%                                       interval in seconds
+%   cfg.artfctdef.clip.timethreshold  = number, minimum duration in seconds
+%                                       of a datasegment with consecutive
+%                                       identical samples to be considered
+%                                       as 'clipped'
+%   cfg.artfctdef.clip.amplthreshold  = number, minimum amplitude
+%                                       difference in consecutive samples
+%                                       to be considered as 'clipped'
+%                                       (default = 0) OR string, percent of
+%                                       the amplitude range considered as
+%                                       'clipped' (i.e. '1%')
+%   cfg.artfctdef.clip.blame          = true; to warn if one or more
+%                                       channels account for a
+%                                       disproportionate number of clipping
+%                                       artifacts
+%   cfg.continuous                    = 'yes' or 'no' whether the file
+%                                       contains continuous data
 %
 % The output argument "artifact" is a Nx2 matrix comparable to the
 % "trl" matrix of FT_DEFINETRIAL. The first column of which specifying the
@@ -31,12 +47,13 @@ function [cfg, artifact] = ft_artifact_clip(cfg, data)
 %
 % To facilitate data-handling and distributed computing you can use
 %   cfg.inputfile   =  ...
-% If you specify this option the input data will be read from a *.mat
-% file on disk. This mat files should contain only a single variable named 'data',
-% corresponding to the input structure.
+% If you specify this option the input data will be read from a *.mat file
+% on disk. This mat files should contain only a single variable named
+% 'data', corresponding to the input structure.
 %
-% See also FT_REJECTARTIFACT, FT_ARTIFACT_CLIP, FT_ARTIFACT_ECG, FT_ARTIFACT_EOG,
-% FT_ARTIFACT_JUMP, FT_ARTIFACT_MUSCLE, FT_ARTIFACT_THRESHOLD, FT_ARTIFACT_ZVALUE
+% See also FT_REJECTARTIFACT, FT_ARTIFACT_CLIP, FT_ARTIFACT_ECG,
+% FT_ARTIFACT_EOG, FT_ARTIFACT_JUMP, FT_ARTIFACT_MUSCLE,
+% FT_ARTIFACT_THRESHOLD, FT_ARTIFACT_ZVALUE
 
 % Copyright (C) 2005-2011, Robert Oostenveld
 %
@@ -87,6 +104,7 @@ if ~isfield(cfg.artfctdef.clip,'timethreshold'), cfg.artfctdef.clip.timethreshol
 if ~isfield(cfg.artfctdef.clip,'amplthreshold'), cfg.artfctdef.clip.amplthreshold = 0.000; end;
 if ~isfield(cfg.artfctdef.clip,'pretim'),        cfg.artfctdef.clip.pretim        = 0.000; end;
 if ~isfield(cfg.artfctdef.clip,'psttim'),        cfg.artfctdef.clip.psttim        = 0.000; end;
+if ~isfield(cfg.artfctdef.clip,'blame'),         cfg.artfctdef.clip.blame         = false; end;
 if ~isfield(cfg, 'headerformat'),                cfg.headerformat                 = [];    end;
 if ~isfield(cfg, 'dataformat'),                  cfg.dataformat                   = [];    end;
 
@@ -139,7 +157,7 @@ artfctdef = cfg.artfctdef.clip;
 
 ntrl = size(trl,1);
 nsgn = length(sgnindx);
-trdist = nan(nsgn,ntrl);
+if artfctdef.blame,   chtrdist = nan(nsgn,ntrl);  end
 for trlop=1:ntrl
   fprintf('searching for clipping artifacts in trial %d\n', trlop);
   % read the data of this trial
@@ -156,9 +174,11 @@ for trlop=1:ntrl
   end
   datflt = preproc(dat, label, time, artfctdef);
   
-  %check if cfg.artfctdef.clip.amplthreshold is an string indicating percentage (e.g. '10%')
-  if ~isempty(cfg.artfctdef.clip.amplthreshold) && ischar(cfg.artfctdef.clip.amplthreshold) && cfg.artfctdef.clip.amplthreshold(end)=='%'
-    ratio = sscanf(cfg.artfctdef.clip.amplthreshold, '%f%%');
+  %check if amplthreshold is a string indicating percentage (e.g. '10%')
+  if ~isempty(artfctdef.amplthreshold) ...
+      && ischar(artfctdef.amplthreshold) ...
+      && artfctdef.amplthreshold(end)=='%'
+    ratio = sscanf(artfctdef.amplthreshold, '%f%%');
     ratio = ratio/100;
     identical = abs(datflt(:,1:(end-1))-datflt(:,2:end));
     r = range(identical,2);
@@ -168,12 +188,12 @@ for trlop=1:ntrl
     identical = identical <= ratio;
   else
     % detect all samples that have the same value as the previous sample
-    identical = abs(datflt(:,1:(end-1))-datflt(:,2:end))<=cfg.artfctdef.clip.amplthreshold;
+    identical = abs(datflt(:,1:(end-1))-datflt(:,2:end)) ...
+      <= artfctdef.amplthreshold;
   end
   
   % ensure that the number of samples does not change
-  identical = [identical zeros(nsgn,1)];
-  chclip = identical;  % set aside to identify which channels clipped
+  identical = [identical zeros(nsgn,1)]; %#ok<AGROW>
   
   % determine the number of consecutively identical samples
   clip = zeros(size(dat));
@@ -184,16 +204,34 @@ for trlop=1:ntrl
       clip(sgnlop,up(k):dw(k)) = dw(k)-up(k);
     end
   end
+  
+  if artfctdef.blame
+    % examine channel distribution of clipping during identified artifacts
+    clipch = (clip>=artfctdef.timethreshold*hdr.Fs);
+    if any(sum(clipch,2) > 1000)  % more than 1s of clipping on any channel
+      diff1 = abs(diff(datflt'));
+      diff2 = nan(size(diff1));
+      for tp = 15:(length(diff1)-15)  % sliding 30 ms time windows
+        diff2(tp,:) = max(diff1((tp-14):(tp+15),:));
+      end
+      figure('WindowStyle','docked'); 
+      plot(diff2(15:(length(diff1)-15),:),'.');
+      if isnumeric(artfctdef.amplthreshold)
+        ylim([0 artfctdef.amplthreshold*1.1]); 
+      end
+      legend(data.label, 'Location','eastoutside'); 
+      title(['Trial #' num2str(trlop)]);
+      % only count samples where 1 to half of all channels are clipping
+      chtrdist(:,trlop) = sum(clipch(:, ...
+        0 < sum(clipch) & sum(clipch) < nsgn/2), 2);
+    end
+  end
+  
   clip = max(clip,[],1);  % collapse over channels
   
   % detect whether there are intervals in which the number of consecutive
   % identical samples is larger than the threshold
   thresh = (clip>=artfctdef.timethreshold*hdr.Fs);
-  
-  if any(thresh)
-    % examine channel distribution of clipping during identified artifacts
-    trdist(:,trlop) = sum(chclip(:,thresh(any(chclip == 0))) ~= 0, 2);
-  end
   
   % remember the thresholded parts as artifacts
   artup = find(diff([0 thresh])== 1) + trl(trlop,1) - 1;
@@ -204,14 +242,18 @@ for trlop=1:ntrl
 end
 
 if ~isempty(artifact)
-  chdist = sum(trdist,2,'omitnan');
-  blame = find(chdist > mean(chdist)*1.1);    % 10% more than fair
-  if numel(blame) > 0
-    disp([char(hdr.label(sgnindx(blame))) ...
-      repmat(' accounts for ', numel(blame), 1) ...
-      num2str((chdist(blame)./mean(chdist)-1)*100,3) ...
-      repmat('% more clipping than average.', numel(blame), 1)]);
-    warning('Consider invalidating the listed channel(s).')
+  if artfctdef.blame
+    chdist = sum(chtrdist,2,'omitnan');
+    blmch = find(chdist > mean(chdist)*1.1 & chdist > median(chdist));
+    if numel(blmch) > 0
+      disp([char(hdr.label(sgnindx(blmch))) ...
+        repmat(' accounts for ', numel(blmch), 1) ...
+        num2str((chdist(blmch)./mean(chdist)-1)*100,3) ...
+        repmat('% more clipping than average.', numel(blmch), 1)]);
+      figure; imagesc(chtrdist); xlabel('Trial #'); ylabel('Channel #');
+      colormap(jet); colorbar;
+      warning('Consider invalidating the listed channel(s).');
+    end
   end
   % add the pretim and psttim to the detected artifacts
   artifact(:,1) = artifact(:,1) - artfctdef.pretim * hdr.Fs;
@@ -223,6 +265,9 @@ cfg.artfctdef.clip          = artfctdef;
 cfg.artfctdef.clip.label    = label;
 cfg.artfctdef.clip.trl      = trl;
 cfg.artfctdef.clip.artifact = artifact;
+if artfctdef.blame
+  cfg.artfctdef.clip.chtrdist = chtrdist;
+end
 
 % do the general cleanup and bookkeeping at the end of the function
 ft_postamble provenance
