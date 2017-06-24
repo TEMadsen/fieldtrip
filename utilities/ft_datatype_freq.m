@@ -135,7 +135,8 @@ switch version
       freq = rmfield(freq, 'toi');
     end
     
-    if isfield(freq, 'cumtapcnt') && isvector(freq.cumtapcnt)
+    if isfield(freq, 'cumtapcnt') && isvector(freq.cumtapcnt) && ...
+        numel(freq.cumtapcnt) ~= numel(freq.freq)   % single trial case should stay a row vector
       % ensure that it is a column vector
       freq.cumtapcnt = freq.cumtapcnt(:);
     end
