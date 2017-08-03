@@ -230,4 +230,4 @@ for ifreqoi = 1:nfreqoi
     spectrum(:,ifreqoi,reqtimeboiind) = dum(:,reqtimeboi);
   end
 end
-
+end   % function
